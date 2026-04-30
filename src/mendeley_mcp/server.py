@@ -336,6 +336,54 @@ async def mendeley_add_document(
         return json.dumps({"error": str(e)})
 
 
+@mcp.tool()
+async def mendeley_update_document(
+    document_id: str,
+    title: str | None = None,
+    doc_type: str | None = None,
+    authors_json: str | None = None,
+    year: int | None = None,
+    source: str | None = None,
+    abstract: str | None = None,
+) -> str:
+    """
+    Update an existing document in your Mendeley library.
+
+    Args:
+        document_id: Existing Mendeley document ID
+        title: New document title
+        doc_type: New Mendeley document type, e.g. 'journal'
+        authors_json: JSON array of author objects with 'first_name' and 'last_name'
+        year: Publication year
+        source: Journal/book name
+        abstract: Document abstract
+
+    Returns:
+        JSON object with the updated document
+    """
+    client = await get_client()
+
+    kwargs: dict[str, Any] = {}
+    if title is not None:
+        kwargs["title"] = title
+    if doc_type is not None:
+        kwargs["type"] = doc_type
+    if authors_json:
+        kwargs["authors"] = json.loads(authors_json)
+    if year is not None:
+        kwargs["year"] = year
+    if source is not None:
+        kwargs["source"] = source
+    if abstract is not None:
+        kwargs["abstract"] = abstract
+
+    try:
+        doc = await client.update_document(document_id=document_id, **kwargs)
+        return json.dumps(format_document(doc), indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
 @mcp.resource("mendeley://library/recent")
 async def get_recent_documents() -> str:
     """Get the 10 most recently modified documents in the library."""
