@@ -88,6 +88,56 @@ def format_document(doc: Document) -> dict[str, Any]:
     }
 
 
+def parse_json_object(value: str | None, field_name: str) -> dict[str, Any] | None:
+    if not value:
+        return None
+    parsed = json.loads(value)
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{field_name} must be a JSON object")
+    return parsed
+
+
+def parse_authors_json(value: str | None) -> list[dict[str, str]] | None:
+    if not value:
+        return None
+    parsed = json.loads(value)
+    if not isinstance(parsed, list):
+        raise ValueError("authors_json must be a JSON array")
+    return parsed
+
+
+def build_document_kwargs(
+    authors_json: str | None = None,
+    year: int | None = None,
+    source: str | None = None,
+    abstract: str | None = None,
+    identifiers_json: str | None = None,
+    volume: str | None = None,
+    issue: str | None = None,
+    pages: str | None = None,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {}
+    authors = parse_authors_json(authors_json)
+    identifiers = parse_json_object(identifiers_json, "identifiers_json")
+    if authors:
+        kwargs["authors"] = authors
+    if year is not None:
+        kwargs["year"] = year
+    if source is not None:
+        kwargs["source"] = source
+    if abstract is not None:
+        kwargs["abstract"] = abstract
+    if identifiers:
+        kwargs["identifiers"] = identifiers
+    if volume is not None:
+        kwargs["volume"] = volume
+    if issue is not None:
+        kwargs["issue"] = issue
+    if pages is not None:
+        kwargs["pages"] = pages
+    return kwargs
+
+
 @mcp.tool()
 async def mendeley_search_library(
     query: str,
@@ -155,6 +205,7 @@ async def mendeley_get_document(
 @mcp.tool()
 async def mendeley_list_documents(
     folder_id: str | None = None,
+    group_id: str | None = None,
     limit: int = 50,
     sort_by: str = "last_modified",
 ) -> str:
@@ -163,6 +214,7 @@ async def mendeley_list_documents(
 
     Args:
         folder_id: Optional folder ID to filter by
+        group_id: Optional group ID to filter by
         limit: Maximum number of results (default: 50, max: 100)
         sort_by: Sort field - 'last_modified', 'created', or 'title'
 
@@ -179,11 +231,29 @@ async def mendeley_list_documents(
     try:
         documents = await client.get_documents(
             folder_id=folder_id,
+            group_id=group_id,
             limit=limit,
             sort=sort_by,
         )
         results = [format_document(doc) for doc in documents]
         return json.dumps(results, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def mendeley_list_groups() -> str:
+    """
+    List Mendeley groups the authenticated user can access.
+
+    Returns:
+        JSON array of groups with IDs and names
+    """
+    client = await get_client()
+
+    try:
+        groups = await client.get_groups()
+        return json.dumps(groups, indent=2)
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -295,10 +365,15 @@ async def mendeley_add_document(
     title: str,
     doc_type: str = "journal",
     authors: list[dict[str, str]] | None = None,
+    authors_json: str | None = None,
     year: int | None = None,
     source: str | None = None,
     abstract: str | None = None,
     identifiers: dict[str, str] | None = None,
+    identifiers_json: str | None = None,
+    volume: str | None = None,
+    issue: str | None = None,
+    pages: str | None = None,
 ) -> str:
     """
     Add a new document to your Mendeley library.
@@ -307,30 +382,95 @@ async def mendeley_add_document(
         title: Document title (required)
         doc_type: Type - 'journal', 'book', 'conference_proceedings', etc.
         authors: List of author dicts with 'first_name' and 'last_name'
+        authors_json: JSON array of author objects, useful when clients cannot pass nested authors
         year: Publication year
         source: Journal/book name
         abstract: Document abstract
         identifiers: Dict with 'doi', 'pmid', 'isbn', etc.
+        identifiers_json: JSON object of identifiers, useful when clients cannot pass nested
+            identifiers
+        volume: Publication volume
+        issue: Publication issue
+        pages: Page range or article number
 
     Returns:
         JSON object with the created document
     """
     client = await get_client()
 
-    kwargs: dict[str, Any] = {}
-    if authors:
-        kwargs["authors"] = authors
-    if year:
-        kwargs["year"] = year
-    if source:
-        kwargs["source"] = source
-    if abstract:
-        kwargs["abstract"] = abstract
-    if identifiers:
-        kwargs["identifiers"] = identifiers
+    try:
+        kwargs = build_document_kwargs(
+            authors_json=authors_json,
+            year=year,
+            source=source,
+            abstract=abstract,
+            identifiers_json=identifiers_json,
+            volume=volume,
+            issue=issue,
+            pages=pages,
+        )
+        if authors:
+            kwargs["authors"] = authors
+        if identifiers:
+            kwargs["identifiers"] = identifiers
+        doc = await client.add_document(title=title, doc_type=doc_type, **kwargs)
+        return json.dumps(format_document(doc), indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def mendeley_add_group_document(
+    group_id: str,
+    title: str,
+    doc_type: str = "journal",
+    authors_json: str | None = None,
+    year: int | None = None,
+    source: str | None = None,
+    abstract: str | None = None,
+    identifiers_json: str | None = None,
+    volume: str | None = None,
+    issue: str | None = None,
+    pages: str | None = None,
+) -> str:
+    """
+    Add a new document directly to a Mendeley group.
+
+    Args:
+        group_id: Mendeley group ID
+        title: Document title
+        doc_type: Type - 'journal', 'book', 'conference_proceedings', etc.
+        authors_json: JSON array of author objects with 'first_name' and 'last_name'
+        year: Publication year
+        source: Journal/book name
+        abstract: Document abstract
+        identifiers_json: JSON object of identifiers, e.g. {"doi":"10..."}
+        volume: Publication volume
+        issue: Publication issue
+        pages: Page range or article number
+
+    Returns:
+        JSON object with the created group document
+    """
+    client = await get_client()
 
     try:
-        doc = await client.add_document(title=title, doc_type=doc_type, **kwargs)
+        kwargs = build_document_kwargs(
+            authors_json=authors_json,
+            year=year,
+            source=source,
+            abstract=abstract,
+            identifiers_json=identifiers_json,
+            volume=volume,
+            issue=issue,
+            pages=pages,
+        )
+        doc = await client.add_group_document(
+            group_id=group_id,
+            title=title,
+            doc_type=doc_type,
+            **kwargs,
+        )
         return json.dumps(format_document(doc), indent=2)
     except Exception as e:
         return json.dumps({"error": str(e)})
@@ -339,46 +479,61 @@ async def mendeley_add_document(
 @mcp.tool()
 async def mendeley_update_document(
     document_id: str,
+    group_id: str | None = None,
     title: str | None = None,
     doc_type: str | None = None,
     authors_json: str | None = None,
     year: int | None = None,
     source: str | None = None,
     abstract: str | None = None,
+    identifiers_json: str | None = None,
+    volume: str | None = None,
+    issue: str | None = None,
+    pages: str | None = None,
 ) -> str:
     """
     Update an existing document in your Mendeley library.
 
     Args:
         document_id: Existing Mendeley document ID
+        group_id: Optional group ID when updating a group-owned document
         title: New document title
         doc_type: New Mendeley document type, e.g. 'journal'
         authors_json: JSON array of author objects with 'first_name' and 'last_name'
         year: Publication year
         source: Journal/book name
         abstract: Document abstract
+        identifiers_json: JSON object of identifiers, e.g. {"doi":"10..."}
+        volume: Publication volume
+        issue: Publication issue
+        pages: Page range or article number
 
     Returns:
         JSON object with the updated document
     """
     client = await get_client()
 
-    kwargs: dict[str, Any] = {}
+    kwargs = build_document_kwargs(
+        authors_json=authors_json,
+        year=year,
+        source=source,
+        abstract=abstract,
+        identifiers_json=identifiers_json,
+        volume=volume,
+        issue=issue,
+        pages=pages,
+    )
     if title is not None:
         kwargs["title"] = title
     if doc_type is not None:
         kwargs["type"] = doc_type
-    if authors_json:
-        kwargs["authors"] = json.loads(authors_json)
-    if year is not None:
-        kwargs["year"] = year
-    if source is not None:
-        kwargs["source"] = source
-    if abstract is not None:
-        kwargs["abstract"] = abstract
 
     try:
-        doc = await client.update_document(document_id=document_id, **kwargs)
+        doc = await client.update_document(
+            document_id=document_id,
+            group_id=group_id,
+            **kwargs,
+        )
         return json.dumps(format_document(doc), indent=2)
     except Exception as e:
         return json.dumps({"error": str(e)})

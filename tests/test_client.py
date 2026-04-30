@@ -1,8 +1,7 @@
 """Tests for the Mendeley API client."""
 
-import pytest
-
 from mendeley_mcp.client import Document, Folder, MendeleyCredentials
+from mendeley_mcp.server import build_document_kwargs, parse_authors_json, parse_json_object
 
 
 class TestMendeleyCredentials:
@@ -139,3 +138,36 @@ class TestFolder:
 
         assert folder.id == "folder-root"
         assert folder.parent_id is None
+
+
+class TestJsonHelpers:
+    """Tests for MCP JSON string helper inputs."""
+
+    def test_parse_authors_json(self):
+        authors = parse_authors_json('[{"first_name":"Ada","last_name":"Lovelace"}]')
+
+        assert authors == [{"first_name": "Ada", "last_name": "Lovelace"}]
+
+    def test_parse_json_object(self):
+        identifiers = parse_json_object('{"doi":"10.1234/test"}', "identifiers_json")
+
+        assert identifiers == {"doi": "10.1234/test"}
+
+    def test_build_document_kwargs(self):
+        kwargs = build_document_kwargs(
+            authors_json='[{"first_name":"Ada","last_name":"Lovelace"}]',
+            year=1843,
+            source="Notes",
+            identifiers_json='{"doi":"10.1234/test"}',
+            volume="1",
+            issue="2",
+            pages="3-4",
+        )
+
+        assert kwargs["authors"] == [{"first_name": "Ada", "last_name": "Lovelace"}]
+        assert kwargs["year"] == 1843
+        assert kwargs["source"] == "Notes"
+        assert kwargs["identifiers"] == {"doi": "10.1234/test"}
+        assert kwargs["volume"] == "1"
+        assert kwargs["issue"] == "2"
+        assert kwargs["pages"] == "3-4"

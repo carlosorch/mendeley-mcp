@@ -233,6 +233,7 @@ class MendeleyClient:
     async def get_documents(
         self,
         folder_id: str | None = None,
+        group_id: str | None = None,
         limit: int = 50,
         sort: str = "last_modified",
         order: str = "desc",
@@ -246,6 +247,8 @@ class MendeleyClient:
         }
         if folder_id:
             params["folder_id"] = folder_id
+        if group_id:
+            params["group_id"] = group_id
 
         response = await self._request(
             "GET",
@@ -265,6 +268,15 @@ class MendeleyClient:
             params={"view": "all"},
         )
         return Document.from_api(response.json())
+
+    async def get_groups(self) -> list[dict[str, Any]]:
+        """Get groups the authenticated user can access."""
+        response = await self._request(
+            "GET",
+            "/groups",
+            accept="application/vnd.mendeley-group.1+json",
+        )
+        return response.json()
 
     async def get_folders(self) -> list[Folder]:
         """Get all folders in the library."""
@@ -382,19 +394,33 @@ class MendeleyClient:
         )
         return Document.from_api(response.json())
 
+    async def add_group_document(
+        self,
+        group_id: str,
+        title: str,
+        doc_type: str = "journal",
+        **kwargs: Any,
+    ) -> Document:
+        """Add a new document directly to a group."""
+        kwargs["group_id"] = group_id
+        return await self.add_document(title=title, doc_type=doc_type, **kwargs)
+
     async def update_document(
         self,
         document_id: str,
+        group_id: str | None = None,
         **kwargs: Any,
     ) -> Document:
         """Update fields on an existing document in the library."""
         if not kwargs:
             raise ValueError("At least one field must be provided for update")
 
+        params = {"group_id": group_id} if group_id else None
         response = await self._request(
             "PATCH",
             f"/documents/{document_id}",
             accept="application/vnd.mendeley-document.1+json",
+            params=params,
             json=kwargs,
             headers={
                 "Content-Type": "application/vnd.mendeley-document.1+json",
