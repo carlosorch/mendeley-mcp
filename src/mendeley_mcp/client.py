@@ -381,3 +381,23 @@ class MendeleyClient:
             },
         )
         return Document.from_api(response.json())
+
+    async def update_document(
+        self,
+        document_id: str,
+        **kwargs: Any,
+    ) -> Document:
+        """Update fields on an existing document in the library."""
+        if not kwargs:
+            raise ValueError("At least one field must be provided for update")
+
+        response = await self._request(
+            "PATCH",
+            f"/documents/{document_id}",
+            accept="application/vnd.mendeley-document.1+json",
+            json=kwargs,
+            headers={
+                "Content-Type": "application/vnd.mendeley-document.1+json",
+            },
+        )
+        return Document.from_api(response.json())
